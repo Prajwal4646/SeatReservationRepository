@@ -3,6 +3,7 @@ package com.example.seats.controller;
 import com.example.seats.exception.ApiException;
 import com.example.seats.model.Show;
 import com.example.seats.model.ShowDetails;
+import com.example.seats.service.AuthService;
 import com.example.seats.service.ShowService;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,14 +22,18 @@ import java.util.Map;
 public class ShowController {
     private final ShowService showService;
     private final RequestParser requestParser;
+    private final AuthService authService;
 
-    public ShowController(ShowService showService, RequestParser requestParser) {
+    public ShowController(ShowService showService, RequestParser requestParser, AuthService authService) {
         this.showService = showService;
         this.requestParser = requestParser;
+        this.authService = authService;
     }
 
     @PostMapping("/shows")
     public ResponseEntity<ShowDetails> createShow(HttpServletRequest request) {
+        authService.requireAdmin(request.getHeader("Authorization"));
+
         JsonNode payload = requestParser.readBody(request);
         JsonNode nameNode = payload.get("name");
         JsonNode seatNode = payload.get("seats");

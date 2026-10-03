@@ -3,6 +3,7 @@ package com.example.seats.controller;
 import com.example.seats.model.CancelResult;
 import com.example.seats.model.Reservation;
 import com.example.seats.model.ReserveResult;
+import com.example.seats.service.AuthService;
 import com.example.seats.service.ReservationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,18 +20,17 @@ import java.util.List;
 public class ReservationController {
     private final ReservationService reservationService;
     private final RequestParser requestParser;
+    private final AuthService authService;
 
-    public ReservationController(ReservationService reservationService, RequestParser requestParser) {
+    public ReservationController(ReservationService reservationService, RequestParser requestParser, AuthService authService) {
         this.reservationService = reservationService;
         this.requestParser = requestParser;
+        this.authService = authService;
     }
 
     @PostMapping("/shows/{showId}/reserve")
     public ResponseEntity<Reservation> reserve(@PathVariable String showId, HttpServletRequest request) {
-        String userId = request.getHeader("X-User-Id");
-        if (userId == null || userId.isBlank()) {
-            userId = "anonymous-user";
-        }
+        String userId = authService.requireUser(request.getHeader("Authorization"));
 
         JsonNode payload = requestParser.readBody(request);
         List<String> seats = requestParser.seatList(payload.get("seats"), 10);
@@ -45,19 +45,13 @@ public class ReservationController {
 
     @GetMapping("/reservations/{reservationId}")
     public Reservation getReservation(@PathVariable String reservationId, HttpServletRequest request) {
-        String userId = request.getHeader("X-User-Id");
-        if (userId == null || userId.isBlank()) {
-            userId = "anonymous-user";
-        }
+        String userId = authService.requireUser(request.getHeader("Authorization"));
         return reservationService.getReservation(reservationId, userId);
     }
 
     @PostMapping("/reservations/{reservationId}/cancel")
     public Reservation cancel(@PathVariable String reservationId, HttpServletRequest request) {
-        String userId = request.getHeader("X-User-Id");
-        if (userId == null || userId.isBlank()) {
-            userId = "anonymous-user";
-        }
+        String userId = authService.requireUser(request.getHeader("Authorization"));
         CancelResult result = reservationService.cancel(reservationId, userId);
         return result.reservation();
     }
