@@ -19,6 +19,11 @@ public class HealthController {
         this.registry = registry;
     }
 
+    @GetMapping("/")
+    public Map<String, String> root() {
+        return Map.of("status", "ok", "app", "seat-reservation-app");
+    }
+
     @GetMapping("/healthz")
     public Map<String, String> healthz() {
         return Map.of("status", "ok");

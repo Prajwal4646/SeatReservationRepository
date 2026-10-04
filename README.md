@@ -1,21 +1,31 @@
 # Seat Reservation App
 
-A Spring Boot seat reservation service built to handle concurrent seat holds and reservations with idempotency, auth, health checks, and Prometheus metrics.
+This is a small Spring Boot service for managing seat availability, user reservations, idempotent retries, and basic operational health checks.
 
-## Features implemented
+## Live app
 
-- Show creation via admin token
-- Seat reservation with authenticated user identity
-- Per-user seat quota enforcement
-- Idempotency key handling for retries
-- Owner-only cancel flow
-- Health and readiness checks
-- Prometheus metrics exposure
-- Dockerized deployment config
+Public URL:
 
-## Local run
+```text
+https://seat-reservation-app-production.up.railway.app
+```
 
-### Option 1: Spring Boot
+## What it does
+
+The app supports the core flow for the assignment:
+
+- create a show as an admin
+- reserve seats as a user
+- enforce per-user booking limits
+- reject duplicate idempotency keys for the same user
+- fetch reservation details
+- cancel reservations
+- expose health and readiness endpoints
+- publish metrics for the app
+
+## Local setup
+
+### Run with Spring Boot
 
 ```bash
 export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/seats'
@@ -24,35 +34,35 @@ export ADMIN_TOKEN='admin-dev-token'
 ./mvnw spring-boot:run
 ```
 
-### Option 2: Docker Compose
+### Run with Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-The app listens on port `8080` by default.
+The service listens on port `8080` by default.
 
-## API summary
+## API examples
 
-### Create show (admin)
+### Create a show (admin only)
 
 ```bash
 curl -X POST http://localhost:8080/shows \
-  -H 'Authorization: Bearer <admin-token>' \
+  -H 'Authorization: Bearer admin-dev-token' \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "friday-night",
-    "seats": ["A1","A2","A3","A4"],
+    "seats": ["A1","A2","A3","A4","A5"],
     "price_paise": 25000,
     "per_user_limit": 4
   }'
 ```
 
-### Reserve seat
+### Reserve seats
 
 ```bash
 curl -X POST http://localhost:8080/shows/{showId}/reserve \
-  -H 'Authorization: Bearer <user-token>' \
+  -H 'Authorization: Bearer <valid-user-jwt>' \
   -H 'Idempotency-Key: key-123' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -61,11 +71,18 @@ curl -X POST http://localhost:8080/shows/{showId}/reserve \
   }'
 ```
 
-### Cancel reservation
+### Fetch a reservation
+
+```bash
+curl -X GET http://localhost:8080/reservations/{reservationId} \
+  -H 'Authorization: Bearer <valid-user-jwt>'
+```
+
+### Cancel a reservation
 
 ```bash
 curl -X POST http://localhost:8080/reservations/{reservationId}/cancel \
-  -H 'Authorization: Bearer <user-token>'
+  -H 'Authorization: Bearer <valid-user-jwt>'
 ```
 
 ### Health and metrics
@@ -76,23 +93,36 @@ curl http://localhost:8080/readyz
 curl http://localhost:8080/metrics
 ```
 
-## Burst test
+## Load test helper
 
-A ready-to-run concurrency burst script is included at the project root:
+There is a small burst script in the project root for quick concurrency checks.
 
 ```bash
 chmod +x ./burst.sh
 ./burst.sh http://localhost:8080
 ```
 
-It creates a show, fires concurrent seat requests against the same hot seat, and prints the confirmed/declined/error outcome distribution.
+It creates a show and then sends a burst of concurrent reservation attempts against the same seat.
+
+## Quick Postman flow
+
+1. Create a show using the admin token.
+2. Generate a valid user JWT.
+3. Reserve a seat with the same header and idempotency key flow.
+4. Fetch the reservation and then cancel it.
+5. Check that the available seat list updates correctly.
 
 ## Observability
 
-- `/healthz` — lightweight liveness check
-- `/readyz` — dependency-aware readiness check
-- `/metrics` — Prometheus scrape format
+- `/healthz` — basic app health
+- `/readyz` — readiness check for dependencies
+- `/metrics` — Prometheus-style metrics
 
 ## Notes
 
-The app uses JWT-style bearer tokens for identity, not request-body user fields. This prevents spoofing and keeps the auth model aligned with the assignment.
+A few contract details matter in practice:
+
+- create-show uses snake_case fields like `price_paise`, `per_user_limit`, and `seats`
+- responses use camelCase names like `pricePaise` and `perUserLimit`
+- user requests need a valid JWT
+- admin requests need to match the configured admin token value exactly

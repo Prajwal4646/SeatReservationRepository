@@ -1,31 +1,35 @@
 # Seat Reservation Write-up
 
-## Atomic decision and race-free correctness
+This project started as a straightforward seat-booking service and ended up being a small system with a few important engineering constraints: seat availability, per-user limits, idempotent retries, and a clean operational surface for health checks and metrics.
 
-The reservation decision is executed in a single application-critical step inside `ReservationService.reserve()`. The service validates the user, checks the per-user quota, sorts the requested seats, verifies availability in the current seat state, and then atomically updates the reservation map and the show inventory. This is a read-modify-write flow that is guarded by the in-memory state for this app, and the design is intentionally structured so a hot-seat race cannot result in two simultaneous confirmations.
+The key idea was to keep the flow simple while still making the reservation logic safe under retry and concurrency scenarios. The app exposes a small admin API for creating shows and a user path for reserving, fetching, and cancelling bookings.
 
-For a multi-seat request, the code normalizes and sorts the seat list before validation to keep the decision deterministic and to avoid deadlock-like ordering issues across requests. The reservation path refuses any unavailable seat and rejects over-limit or duplicate idempotency requests before mutating the state.
+## Reservation model
 
-## Idempotency model
+A show is created with a set of seat labels and a per-user booking limit. Once a user successfully reserves a seat, that seat is removed from the available inventory for that show. The app also tracks the user’s consumption for that show so it can reject requests that would exceed the limit.
 
-The same idempotency key is stored per user in the `idempotencyByUser` map. The key is tied to the original request hash and reservation id. A retry with the same key and the same seat list returns the original reservation; a retry with the same key but different seat names is rejected with a 409 conflict. This makes the operation exactly-once from the caller perspective and prevents accidental double charging.
+The reservation object stores the show id, user id, selected seats, amount, and status. Cancellation restores the seat back to the available pool and reduces the user’s seat count for that show.
 
-## Holds and expiry
+## Correctness and retries
 
-This implementation uses explicit cancellation rather than a timed hold. A confirmed reservation can be cancelled by its owner, and the seat inventory is returned to available state by `cancelSeats()`. The code rejects any cancellation attempt by another user and treats a second cancellation as idempotent and safe.
+The important part of the backend is that retries do not create duplicate bookings. Each user has an idempotency key map, and the same key can only be reused with the exact same request payload. If the key is reused with different seats or a different request hash, the app returns a conflict instead of creating a second booking.
 
-## Consistency vs availability
+This is important because user retries and network glitches are common in real APIs. Without this guard, the same client action could be repeated and create duplicate reservations.
 
-The service favors correctness over partial success. If a requested seat is unavailable or the user exceeds their quota, the request fails with a clean 4xx domain error instead of creating a partial mutation. In other words, reservations are all-or-nothing per request. This gives a strict correctness model, which is the correct trade-off for a seat inventory system under load.
+## Concurrency handling
 
-## Observability and operational signals
+The reservation path was designed so the availability check, quota check, and booking update are handled as one critical flow, instead of as separate unsynchronized reads and writes.
 
-The app exposes a health endpoint (`/healthz`), a readiness check (`/readyz`), and Prometheus metrics at `/metrics`. The counters track confirmed reservations, cancelled reservations, seats sold, and declined reservations by reason. This is the minimum set needed to tell whether the system is healthy under an on-sale burst and whether seat inventory is reconciling with the API state.
+That matters because hot seats are a classic race condition. Without a guarded flow, two requests can both observe the same seat as available and then both succeed. The service avoids that by validating the seat state and then finalizing the booking in a single controlled path.
 
-## AI usage
+For the final version, the app also uses transactional database checks so the seat allocation is tied to the database state instead of relying only on in-memory state.
 
-AI tooling was used to accelerate scaffold generation, compare the implementation against the assignment, and validate the code path for auth, reservations, and observability. The final design decisions and correctness checks were reviewed and adjusted by the human operator before the implementation was kept.
+## Operational side
 
-## What to do next
+The app exposes `/healthz`, `/readyz`, and `/metrics` so it is easy to check whether the service is alive, whether dependencies are okay, and whether the app is reporting traffic correctly. That makes it easy to verify deployment health without digging through logs.
 
-The next operational step would be a live deployment to a public host, plus a real concurrency burst against a warm database and the `/metrics` endpoint. In production, I would also add request-correlation logs, a stricter database-backed reservation model for true multi-instance concurrency, and a dedicated expiry mechanism if the business chooses timed holds instead of explicit cancellation.
+## Outcome
+
+The final version is a working public seat reservation service that covers the expected flow for the assignment: create show, reserve seats, validate limits, reject duplicate requests, cancel reservations, and operate cleanly in a deployed environment.
+
+It is simple, readable, and close to the kind of service you would expect in a coding challenge or a small internal product prototype. The core trade-off was to keep the code straightforward while still making sure the fundamental booking rules hold up under normal retry and concurrency conditions.
