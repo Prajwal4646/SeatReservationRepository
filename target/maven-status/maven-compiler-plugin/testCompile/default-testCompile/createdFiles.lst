@@ -1,0 +1,6 @@
+com/example/seats/service/ReservationServiceTest.class
+com/example/seats/service/SeatReservationFlowTest.class
+com/example/seats/config/DbConfigTest.class
+com/example/seats/service/AuthServiceTest.class
+com/example/seats/SeatReservationAppApplicationTests.class
+com/example/seats/controller/HealthControllerTest.class
